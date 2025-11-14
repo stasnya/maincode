@@ -32,7 +32,7 @@ export default function Vinyls() {
     Photo: "",
   });
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [currentReview, setCurrentReview] = useState(null);
   const [modalRating, setModalRating] = useState(5);
@@ -121,12 +121,10 @@ export default function Vinyls() {
       setSelectedId("");
     }
     setIsModalOpen(true);
-    setSelectedFile(null)
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
-    setSelectedFile(null)
     setFormData({
       Title: "",
       Artist: "",
@@ -152,36 +150,22 @@ export default function Vinyls() {
         alert("Помилка: Щоб додавати або редагувати товари, потрібно увійти як Адміністратор.");
         return; 
     }
-    setIsSubmitting(true);
-    try {
+
+    try {
       const method = selectedId ? "PUT" : "POST";
       const url = selectedId
         ? `http://localhost:5000/api/vinyls/${selectedId}`
         : "http://localhost:5000/api/vinyls";
 
-      // Створюємо FormData
-      const data = new FormData();
-      
-      // Додаємо всі текстові поля з formData
-      data.append('Title', formData.Title);
-      data.append('Artist', formData.Artist);
-      data.append('Genre', formData.Genre);
-      data.append('Country', formData.Country);
-      data.append('Published', formData.Published);
-      data.append('Price', formData.Price);
-      // formData.Photo ми НЕ додаємо
-
-      // Додаємо файл, ТІЛЬКИ ЯКЩО він був обраний
-      if (selectedFile) {
-        data.append('Photo', selectedFile);
-      }
       const res = await fetch(url, {
         method,
         headers: { 
+            "Content-Type": "application/json",
+            // === КРИТИЧНО: ДОДАЄМО ЗАГОЛОВОК АВТОРИЗАЦІЇ ===
             "Authorization": `Bearer ${token}` 
             // ==============================================
         },
-        body: data,
+        body: JSON.stringify(formData),
       });
 
       if (!res.ok) {
@@ -523,25 +507,15 @@ const saveReviewModal = async () => {
               onChange={handleChange}
             />
             <input
-              type="file"
               name="Photo"
-              onChange={(e) => setSelectedFile(e.target.files[0])}
+              placeholder="Назва фото (файл у /uploads)"
+              value={formData.Photo}
+              onChange={handleChange}
             />
-            {/* Опціонально: показуємо поточне фото під час редагування */}
-            {selectedId && formData.Photo && !selectedFile && (
-              <div style={{ marginTop: '10px' }}>
-                <p>Поточне фото:</p>
-                <img
-                  src={`http://localhost:5000/uploads/${formData.Photo}`}
-                  alt="Поточне"
-                  style={{ width: '100px', height: '100px', objectFit: 'cover' }}
-                />
-              </div>
-            )}
 
             <div className="modal-actions">
-              <button className="save-btn" onClick={handleSave} disabled={isSubmitting}>Зберегти </button>
-              <button className="close-btn" onClick={handleCloseModal} disabled={isSubmitting}>Закрити</button>
+              <button className="save-btn" onClick={handleSave}>Зберегти</button>
+              <button className="close-btn" onClick={handleCloseModal}>Закрити</button>
             </div>
           </div>
         </div>

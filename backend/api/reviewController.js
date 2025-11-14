@@ -1,34 +1,48 @@
+// backend/api/reviewController.js
+
 import express from "express";
 import { db } from "../index.js";
+// Обов'язкові імпорти для захисту
 import { authenticateToken, authorizeAdmin } from "../middleware/authMiddleware.js"; 
 
 const router = express.Router();
 
 const idempotencyStore = new Map();
 
+// Допоміжна функція для уніфікованої обробки помилок
 const sendError = (res, req, message, httpStatus = 500, code = null, details = []) => {
+    // req.rid може бути undefined, якщо ви його не додавали у middleware
     console.error(`[${req.rid || 'API'}] Error: ${message}`, details);
     res.status(httpStatus).json({ error: message, code, details, requestId: req.rid || null });
 };
 
+// ==========================================================
+// 1. ДОДАВАННЯ ВІДГУКУ (POST /reviews)
+// ... (Ця функція без змін, оскільки вона працює) ...
+// ==========================================================
 router.post("/reviews", authenticateToken, (req, res) => {
     const key = req.get("Idempotency-Key");
-    const authenticatedUserId = req.user.id;
+    const authenticatedUserId = req.user.id; // Беремо ID користувача З ТОКЕНА
 
+    // --- ЛОГІКА ІДЕМПОТЕНТНОСТІ ---
     if (key) {
         if (idempotencyStore.has(key)) {
             const stored = idempotencyStore.get(key);
             return res.status(201).json({ ...stored, requestId: req.rid });
         }
     }
+    // -----------------------------
 
+    // 1. ВАЛІДАЦІЯ ТА ВИЛУЧЕННЯ ПОЛІВ
     const { productType, productId, text, comment, rating } = req.body;
     const finalComment = text || comment;
     
+    // Перевіряємо, чи всі необхідні дані присутні
     if (!productType || !productId || !finalComment || finalComment.length < 3) {
         return sendError(res, req, "Validation error: Missing fields or comment too short", 400, "VALIDATION_ERROR");
     }
 
+    // 2. ФОРМУВАННЯ SQL
     const tableName = productType === 'vinyl' ? "ReviewsVinyls" : "ReviewsCassettes";
     const productField = productType === 'vinyl' ? "vinyl_id" : "cassette_id";
     
@@ -36,9 +50,10 @@ router.post("/reviews", authenticateToken, (req, res) => {
         INSERT INTO ${tableName} (${productField}, userId, rating, comment, date, productType)
         VALUES (?, ?, ?, ?, NOW(), ?)`;
 
+    // 3. ВИКОРИСТОВУЄМО authenticatedUserId З ТОКЕНА
     const params = [
         productId, 
-        authenticatedUserId,
+        authenticatedUserId, // << Використовуємо ID з токена
         rating || 5, 
         finalComment, 
         productType
@@ -66,6 +81,10 @@ router.post("/reviews", authenticateToken, (req, res) => {
     });
 });
 
+// ==========================================================
+// 2. ОТРИМАННЯ ВІДГУКІВ (GET /reviews)
+// ... (Ця функція без змін) ...
+// ==========================================================
 router.get("/reviews", (req, res) => {
     const { productType, productId } = req.query;
 
@@ -115,12 +134,17 @@ router.get("/reviews/:id", (req, res) => {
 
 router.get("/health", (req, res) => res.json({ status: "ok" }));
 
+
+// ==========================================================
+// 3. ОНОВЛЕННЯ ВІДГУКУ (PUT /reviews/:id) - ВИПРАВЛЕНО
+// ==========================================================
 router.put("/reviews/:id", authenticateToken, async (req, res) => {
     const reviewId = req.params.id;
-    const userIdFromToken = req.user.id; 
+    const userIdFromToken = req.user.id; // ID користувача, який робить запит
     const userRole = req.user.role;
     const { rating, comment } = req.body; 
 
+    // 1. ПЕРЕВІРКА АВТОРСТВА (якщо не Адмін)
     if (userRole !== 'Admin') {
         const findReviewSql = `
             SELECT userId FROM ReviewsVinyls WHERE ID = ? 
@@ -129,20 +153,24 @@ router.put("/reviews/:id", authenticateToken, async (req, res) => {
         `;
 
         try {
+            // Використовуємо db.promise() для роботи з async/await
             const [results] = await db.promise().query(findReviewSql, [reviewId, reviewId]);
             const review = results[0];
 
             if (!review) {
                  return res.status(404).json({ message: 'Коментар не знайдено.' });
             }
+            // === КРИТИЧНЕ ВИПРАВЛЕННЯ: ПРИВЕДЕННЯ ТИПІВ ===
             if (String(review.userId) !== String(userIdFromToken)) {
                 return res.status(403).json({ message: 'Forbidden: Ви можете редагувати лише власні коментарі.' });
             }
+            // ==========================================
         } catch(e) {
              return sendError(res, req, "DB Error during author check", 500, "AUTHOR_CHECK_FAILED");
         }
     }
     
+    // 2. ВАЛІДАЦІЯ
     if (comment !== undefined && comment.trim().length < 3) {
         return sendError(res, req, "Comment must be at least 3 characters.", 400, "INVALID_COMMENT_LENGTH");
     }
@@ -150,6 +178,7 @@ router.put("/reviews/:id", authenticateToken, async (req, res) => {
         return sendError(res, req, "No data provided for update.", 400, "NO_DATA_PROVIDED");
     }
 
+    // 3. ФОРМУВАННЯ SQL (залишаємо як було)
     const updateReview = (sql) => {
          return new Promise((resolve, reject) => {
              db.query(sql, [rating, comment, reviewId], (err, result) => {
@@ -176,11 +205,15 @@ router.put("/reviews/:id", authenticateToken, async (req, res) => {
         });
 });
 
+// ==========================================================
+// 4. ВИДАЛЕННЯ ВІДГУКУ (DELETE /reviews/:id) - ВИПРАВЛЕНО
+// ==========================================================
 router.delete("/reviews/:id", authenticateToken, async (req, res) => { 
     const reviewId = req.params.id;
     const userIdFromToken = req.user.id;
     const userRole = req.user.role;
     
+    // 1. ЛОГІКА АВТОРИЗАЦІЇ
     if (userRole !== 'Admin') { 
         
         const findReviewSql = `
@@ -193,15 +226,18 @@ router.delete("/reviews/:id", authenticateToken, async (req, res) => {
             const [results] = await db.promise().query(findReviewSql, [reviewId, reviewId]);
             const review = results[0];
 
+            // === КРИТИЧНЕ ВИПРАВЛЕННЯ: ПРИВЕДЕННЯ ТИПІВ ===
             if (review && String(review.userId) !== String(userIdFromToken)) { 
                 return res.status(403).json({ message: 'Forbidden: Ви можете видаляти лише власні коментарі.' });
             }
+            // ==========================================
 
         } catch(e) {
              return sendError(res, req, "DB Error during author check", 500, "AUTHOR_CHECK_FAILED");
         }
     }
     
+    // 2. ФОРМУВАННЯ SQL (Цей блок виконується, якщо користувач - Адмін АБО автор)
     const deleteReview = (sql) => {
          return new Promise((resolve, reject) => {
              db.query(sql, [reviewId], (err, result) => {
@@ -214,6 +250,7 @@ router.delete("/reviews/:id", authenticateToken, async (req, res) => {
     const sqlDeleteCassette = "DELETE FROM ReviewsCassettes WHERE ID = ?";
     const sqlDeleteVinyl = "DELETE FROM ReviewsVinyls WHERE ID = ?";
 
+    // 3. ВИКОНАННЯ ВИДАЛЕННЯ
     deleteReview(sqlDeleteCassette)
         .then(affectedRows => {
             if (affectedRows > 0) return res.status(204).send();

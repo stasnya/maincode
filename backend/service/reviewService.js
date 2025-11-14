@@ -1,6 +1,9 @@
+// backend/api/ProductController.js
 import express from "express";
 import { db } from "../index.js"; 
+// === КРОК 1: ІМПОРТУЄМО MIDDLEWARE ===
 import { authenticateToken, authorizeAdmin } from "../middleware/authMiddleware.js"; 
+// ======================================
 const router = express.Router();
 
 /**
@@ -12,6 +15,10 @@ const createCrudHandlers = (entityType) => {
     const idField = 'ID'; 
 
     return {
+        // ... (getAll, getById, create, update, delete залишаються без змін) ...
+        // Примітка: Логіка `create`, `update`, `delete` тут не змінюється, 
+        // оскільки захист ролі відбувається ДО їхнього виклику.
+        // ...
         getAll: (req, res) => {
              db.query(`SELECT * FROM ${table}`, (err, results) => {
                  if (err) return res.status(500).json({ error: "DBError", message: err.message });
@@ -64,16 +71,24 @@ router.get("/health", (req, res) => {
     res.json({ status: "ok" });
 });
 
+// =========================================================
+// VINYLS ROUTES: GET доступні всім, POST/PUT/DELETE - тільки Адміну
+// =========================================================
 router.get("/vinyls", vinylHandlers.getAll);
 router.get("/vinyls/:id", vinylHandlers.getById);
 
+// КРОК 2: ДОДАЄМО ЗАХИСТ
 router.post("/vinyls", authenticateToken, authorizeAdmin, vinylHandlers.create);
 router.put("/vinyls/:id", authenticateToken, authorizeAdmin, vinylHandlers.update);
 router.delete("/vinyls/:id", authenticateToken, authorizeAdmin, vinylHandlers.delete);
 
+// =========================================================
+// CASSETTES ROUTES: GET доступні всім, POST/PUT/DELETE - тільки Адміну
+// =========================================================
 router.get("/cassettes", cassetteHandlers.getAll);
 router.get("/cassettes/:id", cassetteHandlers.getById);
 
+// КРОК 2: ДОДАЄМО ЗАХИСТ
 router.post("/cassettes", authenticateToken, authorizeAdmin, cassetteHandlers.create);
 router.put("/cassettes/:id", authenticateToken, authorizeAdmin, cassetteHandlers.update);
 router.delete("/cassettes/:id", authenticateToken, authorizeAdmin, cassetteHandlers.delete);
